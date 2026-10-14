@@ -1,0 +1,22 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+psycopg2-binary>=2.9.10
+alembic==1.13.2
+pydantic==2.9.2
+pydantic-settings==2.5.2
+python-multipart==0.0.9
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+pandas==2.2.3
+openpyxl==3.1.5
+reportlab==5.0.1
+opencv-python==4.10.0.84
+insightface==0.7.3
+onnxruntime>=1.20.0
+numpy>=1.26.0
+pillow>=10.4.0
+pyside6>=6.7.3
+# Lectores de huella ZKTeco (ZK4500/ZK9500)
+pyusb>=1.2.1
+libusb>=1.0.27
