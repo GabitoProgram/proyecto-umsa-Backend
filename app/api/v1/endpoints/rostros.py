@@ -1,6 +1,7 @@
 import cv2
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel, ConfigDict
@@ -87,6 +88,25 @@ async def registrar_rostro(
         "id_postulante": id_postulante,
         "estado_biometria": postulante.estado_biometria
     }
+
+
+@router.get("/{id_postulante}/imagen")
+def obtener_imagen_rostro(
+    id_postulante: int,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    rostro = db.query(Rostro).filter(
+        Rostro.id_postulante == id_postulante,
+    ).order_by(Rostro.fecha_registro.desc()).first()
+    if not rostro or not rostro.imagen_captura:
+        raise HTTPException(status_code=404, detail="El postulante no tiene foto")
+
+    return Response(
+        content=bytes(rostro.imagen_captura),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.get("/{id_postulante}/huellas", response_model=List[HuellaOut])

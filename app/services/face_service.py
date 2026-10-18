@@ -1,7 +1,5 @@
 import cv2
 import numpy as np
-import insightface
-from insightface.app import FaceAnalysis
 
 class FaceService:
     _instance = None
@@ -9,10 +7,26 @@ class FaceService:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(FaceService, cls).__new__(cls)
-            # Inicializar modelo buffalo_s (detector scrfd + extractor arcface 512d)
-            cls._instance.app = FaceAnalysis(name="buffalo_s", providers=['CPUExecutionProvider'])
-            cls._instance.app.prepare(ctx_id=0, det_size=(640, 640))
+            cls._instance.app = None
         return cls._instance
+
+    def _get_app(self):
+        if self.app is None:
+            try:
+                from insightface.app import FaceAnalysis
+            except ModuleNotFoundError as error:
+                raise RuntimeError(
+                    "La funcionalidad facial requiere instalar insightface y sus "
+                    "dependencias nativas."
+                ) from error
+
+            # Inicializar modelo buffalo_s (detector scrfd + extractor arcface 512d)
+            self.app = FaceAnalysis(
+                name="buffalo_s",
+                providers=["CPUExecutionProvider"],
+            )
+            self.app.prepare(ctx_id=0, det_size=(640, 640))
+        return self.app
 
     def procesar_imagen_bytes(self, image_bytes: bytes):
         """Convierte bytes crudos a matriz BGR para OpenCV"""
@@ -22,7 +36,7 @@ class FaceService:
 
     def extraer_embedding(self, img_bgr):
         """Detecta rostros y extrae el embedding del rostro dominante (más grande)"""
-        faces = self.app.get(img_bgr)
+        faces = self._get_app().get(img_bgr)
         if not faces:
             return None, None
         

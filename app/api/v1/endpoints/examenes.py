@@ -9,6 +9,7 @@ from app.api.deps import get_current_user, require_app_key, registrar_auditoria
 from app.models.usuario import Usuario, RolUsuario
 from app.models.academico import Examen
 from app.models.asignacion import Asignacion, Inscripcion
+from app.models.infraestructura import Aula, Asiento
 from app.models.postulante import Postulante
 from app.models.biometria import Huella, Rostro
 from app.models.marcacion import RegistroIngreso, ResultadoMarcacion
@@ -201,12 +202,103 @@ def contadores_examenes_activos(
             RegistroIngreso.id_examen == examen.id_examen,
             RegistroIngreso.resultado == ResultadoMarcacion.ACEPTADO
         ).count()
+        asignaciones = db.query(Asignacion).filter(
+            Asignacion.id_examen == examen.id_examen
+        ).all()
+        aula_ids = {asignacion.id_aula for asignacion in asignaciones}
+        asiento_ids = {
+            asignacion.id_asiento
+            for asignacion in asignaciones
+            if asignacion.id_asiento is not None
+        }
+        total_asientos = db.query(Asiento).filter(
+            Asiento.id_aula.in_(aula_ids),
+            Asiento.habilitado.is_(True)
+        ).count() if aula_ids else 0
+        asientos_ocupados = len(asiento_ids)
+        asientos_libres = max(0, total_asientos - asientos_ocupados)
+        porcentaje_asientos = (
+            round(asientos_ocupados / total_asientos * 100, 2)
+            if total_asientos else 0.0
+        )
+        aulas_data = []
+        for aula_id in sorted(aula_ids):
+            aula = db.query(Aula).filter(Aula.id_aula == aula_id).first()
+            if not aula:
+                continue
+            aula_asientos = db.query(Asiento).filter(
+                Asiento.id_aula == aula_id,
+                Asiento.habilitado.is_(True),
+            ).count()
+            aula_asignaciones = [
+                asignacion for asignacion in asignaciones
+                if asignacion.id_aula == aula_id
+            ]
+            aula_asientos_ocupados = len({
+                asignacion.id_asiento
+                for asignacion in aula_asignaciones
+                if asignacion.id_asiento is not None
+            })
+            aula_asientos_libres = max(
+                0, aula_asientos - aula_asientos_ocupados
+            )
+            aula_ingresados = db.query(
+                distinct(RegistroIngreso.id_inscripcion)
+            ).join(
+                Asignacion,
+                Asignacion.id_asignacion == RegistroIngreso.id_asignacion,
+            ).filter(
+                RegistroIngreso.id_examen == examen.id_examen,
+                RegistroIngreso.resultado == ResultadoMarcacion.ACEPTADO,
+                Asignacion.id_aula == aula_id,
+            ).count()
+            aulas_data.append({
+                "id_aula": aula.id_aula,
+                "nombre": aula.nombre,
+                "total_asientos": aula_asientos,
+                "asientos_ocupados": aula_asientos_ocupados,
+                "asientos_libres": aula_asientos_libres,
+                "faltan_ingresar": max(
+                    0, len(aula_asignaciones) - aula_ingresados
+                ),
+                "postulantes_ingresados": aula_ingresados,
+                "porcentaje_ocupacion": (
+                    round(aula_asientos_ocupados / aula_asientos * 100, 2)
+                    if aula_asientos else 0.0
+                ),
+            })
+        ultimos = db.query(RegistroIngreso).filter(
+            RegistroIngreso.id_examen == examen.id_examen
+        ).order_by(RegistroIngreso.fecha_hora.desc()).limit(10).all()
         resultado.append({
             "id_examen": examen.id_examen,
             "materia": examen.materia,
+            "curso": examen.carrera.nombre if examen.carrera else "Curso",
             "total_asignados": total,
             "total_ingresados": ingresados,
             "total_pendientes": max(0, total - ingresados),
-            "porcentaje_asistencia": round(ingresados / total * 100, 2) if total else 0.0
+            "porcentaje_asistencia": round(ingresados / total * 100, 2) if total else 0.0,
+            "total_asientos": total_asientos,
+            "asientos_ocupados": asientos_ocupados,
+            "asientos_libres": asientos_libres,
+            "porcentaje_asientos": porcentaje_asientos,
+            "aulas": aulas_data,
+            "ultimos_ingresos": [
+                {
+                    "hora": registro.fecha_hora.strftime("%H:%M:%S"),
+                    "metodo": (
+                        registro.metodo.value
+                        if hasattr(registro.metodo, "value")
+                        else str(registro.metodo)
+                    ),
+                    "resultado": (
+                        registro.resultado.value
+                        if hasattr(registro.resultado, "value")
+                        else str(registro.resultado)
+                    ),
+                    "estacion": registro.estacion or "Estación",
+                }
+                for registro in ultimos
+            ],
         })
     return resultado
