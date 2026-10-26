@@ -1,3 +1,5 @@
+import threading
+import time
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -60,6 +62,7 @@ def listar_postulantes_examen(
             ],
             "id_rostro": rostro.id_rostro if rostro else None,
             "rostro_habilitado": bool(rostro and rostro.habilitada),
+            "id_asignacion": asignacion.id_asignacion if asignacion else None,
             "numero_asiento": asignacion.asiento.numero_asiento if asignacion and asignacion.asiento else None,
             "nombre_aula": asignacion.aula.nombre if asignacion and asignacion.aula else None
         })
@@ -178,11 +181,32 @@ def examenes_activos_ahora(
     return {"activos": activos}
 
 
+# Los contadores se piden desde cada estación cada pocos segundos. Se calculan una
+# vez y se reparten a todas durante unos segundos, en vez de repetir las consultas.
+_CONTADORES_TTL_S = 3.0
+_contadores_cache = {"t": 0.0, "datos": None}
+_contadores_lock = threading.Lock()
+
+
 @router.get("/activos-ahora/contadores")
 def contadores_examenes_activos(
     db: Session = Depends(get_db),
     _: None = Depends(require_app_key)
 ):
+    datos = _contadores_cache["datos"]
+    if datos is not None and time.monotonic() - _contadores_cache["t"] < _CONTADORES_TTL_S:
+        return datos
+    with _contadores_lock:
+        datos = _contadores_cache["datos"]
+        if datos is not None and time.monotonic() - _contadores_cache["t"] < _CONTADORES_TTL_S:
+            return datos
+        datos = _calcular_contadores_examenes_activos(db)
+        _contadores_cache["datos"] = datos
+        _contadores_cache["t"] = time.monotonic()
+        return datos
+
+
+def _calcular_contadores_examenes_activos(db: Session):
     ahora = datetime.now()
     examenes = db.query(Examen).filter(Examen.fecha == ahora.date()).all()
     resultado = []

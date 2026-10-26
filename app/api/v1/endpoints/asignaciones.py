@@ -40,6 +40,77 @@ class DisponibilidadOut(BaseModel):
     suficiente: bool
 
 
+class EditarAsignacionIn(BaseModel):
+    id_aula: int
+    id_asiento: int
+
+
+@router.patch("/{id_asignacion}", response_model=AsignacionOut)
+def editar_asignacion(
+    id_asignacion: int,
+    payload: EditarAsignacionIn,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_user),
+):
+    asignacion = db.query(Asignacion).filter(
+        Asignacion.id_asignacion == id_asignacion
+    ).first()
+    if not asignacion:
+        raise HTTPException(status_code=404, detail="Asignación no encontrada")
+
+    aula = db.query(Aula).filter(
+        Aula.id_aula == payload.id_aula,
+        Aula.activa.is_(True),
+    ).first()
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula no encontrada o inactiva")
+
+    asiento = db.query(Asiento).filter(
+        Asiento.id_asiento == payload.id_asiento,
+        Asiento.id_aula == payload.id_aula,
+        Asiento.habilitado.is_(True),
+    ).first()
+    if not asiento:
+        raise HTTPException(
+            status_code=400,
+            detail="El asiento no existe, está deshabilitado o no pertenece al aula",
+        )
+
+    ocupado = db.query(Asignacion).filter(
+        Asignacion.id_examen == asignacion.id_examen,
+        Asignacion.id_asiento == payload.id_asiento,
+        Asignacion.id_asignacion != id_asignacion,
+    ).first()
+    if ocupado:
+        raise HTTPException(
+            status_code=409,
+            detail="Ese asiento ya está asignado a otro postulante en este examen",
+        )
+
+    asignacion.id_aula = payload.id_aula
+    asignacion.id_asiento = payload.id_asiento
+    db.commit()
+    db.refresh(asignacion)
+    registrar_auditoria(
+        db,
+        admin.id_usuario,
+        "EDITAR_ASIGNACION",
+        "asignaciones",
+        f"Asignación {id_asignacion}: aula {aula.nombre}, asiento #{asiento.numero_asiento}",
+    )
+    return AsignacionOut(
+        id_asignacion=asignacion.id_asignacion,
+        id_inscripcion=asignacion.id_inscripcion,
+        id_examen=asignacion.id_examen,
+        id_aula=asignacion.id_aula,
+        id_asiento=asignacion.id_asiento,
+        numero_asiento=asiento.numero_asiento,
+        nombre_aula=aula.nombre,
+        fecha_asignacion=asignacion.fecha_asignacion,
+        fecha_sorteo_asiento=asignacion.fecha_sorteo_asiento,
+    )
+
+
 def _pendientes_examen(db: Session, examen: Examen) -> List[Inscripcion]:
     inscripciones_asignadas = db.query(Asignacion.id_inscripcion).filter(
         Asignacion.id_examen == examen.id_examen

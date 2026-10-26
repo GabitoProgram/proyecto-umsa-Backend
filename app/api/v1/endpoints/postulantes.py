@@ -6,6 +6,8 @@ from app.core.database import get_db
 from app.api.deps import get_current_user, registrar_auditoria
 from app.models.usuario import Usuario
 from app.models.postulante import Postulante, OrigenRegistro
+from app.models.marcacion import RegistroIngreso
+from app.models.asignacion import Asignacion
 from app.models.academico import Carrera, Gestion, Inscripcion
 from app.models.biometria import Rostro, Huella
 from app.schemas.postulante import PostulanteCreate, PostulanteUpdate, PostulanteResponse
@@ -125,9 +127,43 @@ def eliminar_postulante(
     postulante = db.query(Postulante).filter(Postulante.id_postulante == id_postulante).first()
     if not postulante:
         raise HTTPException(status_code=404, detail="Postulante no encontrado")
+
     ci = postulante.ci
-    db.delete(postulante)
-    db.commit()
+    inscripciones = db.query(Inscripcion).filter(
+        Inscripcion.id_postulante == id_postulante
+    ).all()
+    ids_inscripcion = [inscripcion.id_inscripcion for inscripcion in inscripciones]
+    ids_asignacion = [
+        id_asignacion
+        for (id_asignacion,) in db.query(Asignacion.id_asignacion).filter(
+            Asignacion.id_inscripcion.in_(ids_inscripcion)
+        ).all()
+    ] if ids_inscripcion else []
+
+    # Conserva el historial de marcaciones, pero evita que sus FK bloqueen
+    # la eliminación de la inscripción y de sus asignaciones.
+    if ids_inscripcion:
+        db.query(RegistroIngreso).filter(
+            RegistroIngreso.id_inscripcion.in_(ids_inscripcion)
+        ).update(
+            {"id_inscripcion": None},
+            synchronize_session=False,
+        )
+    if ids_asignacion:
+        db.query(RegistroIngreso).filter(
+            RegistroIngreso.id_asignacion.in_(ids_asignacion)
+        ).update(
+            {"id_asignacion": None},
+            synchronize_session=False,
+        )
+
+    try:
+        db.delete(postulante)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
     registrar_auditoria(db, admin.id_usuario, "ELIMINAR_POSTULANTE", "postulantes", f"CI {ci}")
 
 def _completar_vacios(postulante: Postulante, fila: dict) -> bool:

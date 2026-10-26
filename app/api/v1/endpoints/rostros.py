@@ -43,7 +43,7 @@ def actualizar_estado_biometria(db: Session, postulante: Postulante):
         postulante.estado_biometria = EstadoBiometria.PENDIENTE
 
 @router.post("/{id_postulante}/registrar")
-async def registrar_rostro(
+def registrar_rostro(
     id_postulante: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -53,7 +53,7 @@ async def registrar_rostro(
     if not postulante:
         raise HTTPException(status_code=404, detail="Postulante no encontrado")
 
-    contents = await file.read()
+    contents = file.file.read()
     img_bgr = face_service.procesar_imagen_bytes(contents)
     if img_bgr is None:
         raise HTTPException(status_code=400, detail="Formato de imagen inválido o archivo corrupto")
@@ -77,6 +77,7 @@ async def registrar_rostro(
     actualizar_estado_biometria(db, postulante)
 
     db.commit()
+    face_service.invalidar_cache()
     registrar_auditoria(
         db, admin.id_usuario, "REGISTRO_FACIAL", "rostros",
         f"Postulante {postulante.ci} - Estado Biometría: {postulante.estado_biometria}"
@@ -121,7 +122,7 @@ def listar_huellas(
 
 
 @router.post("/{id_postulante}/huellas/{tipo_dedo}", response_model=HuellaOut)
-async def registrar_huella(
+def registrar_huella(
     id_postulante: int,
     tipo_dedo: int,
     file: UploadFile = File(...),
@@ -138,7 +139,7 @@ async def registrar_huella(
     postulante = db.query(Postulante).filter(Postulante.id_postulante == id_postulante).first()
     if not postulante:
         raise HTTPException(status_code=404, detail="Postulante no encontrado")
-    contenido = await file.read()
+    contenido = file.file.read()
     logger.info("Plantilla recibida: %d bytes", len(contenido))
     if not contenido:
         raise HTTPException(status_code=400, detail="La plantilla de huella está vacía")
@@ -198,6 +199,7 @@ def cambiar_estado_rostro(
     rostro.habilitada = habilitada
     rostro.habilitada_por = admin.id_usuario if habilitada else None
     db.commit()
+    face_service.invalidar_cache()
     db.refresh(rostro)
     registrar_auditoria(
         db, admin.id_usuario, "CAMBIAR_ESTADO_ROSTRO", "rostros",
@@ -223,13 +225,13 @@ def cambiar_estado_huella(
     return huella
 
 @router.post("/identificar")
-async def identificar_rostro(
+def identificar_rostro(
     file: UploadFile = File(...),
     umbral: float = SIMILITUD_UMBRAL_DEFAULT,
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_current_user)
 ):
-    contents = await file.read()
+    contents = file.file.read()
     img_bgr = face_service.procesar_imagen_bytes(contents)
     if img_bgr is None:
         raise HTTPException(status_code=400, detail="Archivo de imagen inválido")
@@ -238,24 +240,18 @@ async def identificar_rostro(
     if embedding_query is None:
         raise HTTPException(status_code=400, detail="No se detectó ningún rostro en la captura")
 
-    # Obtener todos los rostros habilitados por un administrador
-    rostros_activos = db.query(Rostro).filter(Rostro.habilitada.is_(True)).all()
-    if not rostros_activos:
+    # Búsqueda 1:N sobre la caché en memoria de rostros habilitados
+    mejor = face_service.buscar_mejor(embedding_query, db)
+    if mejor is None:
         return {"coincidencia": False, "mensaje": "No hay rostros activos en la base de datos"}
+    _, id_postulante_mejor, mejor_score = mejor
 
-    mejor_coincidencia = None
-    mejor_score = -1.0
-
-    for r in rostros_activos:
-        similitud = face_service.similitud_coseno(embedding_query, r.embedding)
-        if similitud > mejor_score:
-            mejor_score = similitud
-            mejor_coincidencia = r
-
-    if mejor_score >= umbral and mejor_coincidencia:
+    if mejor_score >= umbral:
         postulante = db.query(Postulante).filter(
-            Postulante.id_postulante == mejor_coincidencia.id_postulante
+            Postulante.id_postulante == id_postulante_mejor
         ).first()
+        if not postulante:
+            return {"coincidencia": False, "mensaje": "Postulante no encontrado"}
 
         return {
             "coincidencia": True,

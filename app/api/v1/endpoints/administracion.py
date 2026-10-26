@@ -7,7 +7,9 @@ from app.core.database import get_db
 from app.api.deps import get_current_user, require_super_admin, registrar_auditoria
 from app.models.usuario import Usuario, RolUsuario
 from app.models.auditoria import Auditoria
-from app.models.academico import Carrera, Gestion, Examen, PeriodoGestion
+from app.models.academico import Carrera, Gestion, Examen, Inscripcion, PeriodoGestion
+from app.models.asignacion import Asignacion
+from app.models.marcacion import RegistroIngreso
 from app.models.infraestructura import Aula, Asiento
 from app.schemas.base import (
     CarreraCreate, CarreraOut,
@@ -188,6 +190,31 @@ def actualizar_carrera(
     registrar_auditoria(db, admin.id_usuario, "ACTUALIZAR_CARRERA", "carreras", f"Carrera {carrera.nombre}")
     return carrera
 
+
+@router.delete("/carreras/{id_carrera}", status_code=204)
+def eliminar_carrera(
+    id_carrera: int,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_user),
+):
+    carrera = db.query(Carrera).filter(Carrera.id_carrera == id_carrera).first()
+    if not carrera:
+        raise HTTPException(status_code=404, detail="Carrera no encontrada")
+    examenes = db.query(Examen).filter(Examen.id_carrera == id_carrera).count()
+    inscripciones = db.query(Inscripcion).filter(Inscripcion.id_carrera == id_carrera).count()
+    if examenes or inscripciones:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No se puede eliminar: la carrera tiene {examenes} examen(es) "
+                f"y {inscripciones} inscripción(es)."
+            ),
+        )
+    nombre = carrera.nombre
+    db.delete(carrera)
+    db.commit()
+    registrar_auditoria(db, admin.id_usuario, "ELIMINAR_CARRERA", "carreras", f"Carrera {nombre}")
+
 # GESTIONES
 @router.post("/gestiones", response_model=GestionOut)
 def crear_gestion(payload: GestionCreate, db: Session = Depends(get_db), admin: Usuario = Depends(get_current_user)):
@@ -240,6 +267,31 @@ def actualizar_gestion(
     db.refresh(gestion)
     registrar_auditoria(db, admin.id_usuario, "ACTUALIZAR_GESTION", "gestiones", f"Gestión {gestion.nombre}")
     return gestion
+
+
+@router.delete("/gestiones/{id_gestion}", status_code=204)
+def eliminar_gestion(
+    id_gestion: int,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_user),
+):
+    gestion = db.query(Gestion).filter(Gestion.id_gestion == id_gestion).first()
+    if not gestion:
+        raise HTTPException(status_code=404, detail="Gestión no encontrada")
+    examenes = db.query(Examen).filter(Examen.id_gestion == id_gestion).count()
+    inscripciones = db.query(Inscripcion).filter(Inscripcion.id_gestion == id_gestion).count()
+    if examenes or inscripciones:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No se puede eliminar: la gestión tiene {examenes} examen(es) "
+                f"y {inscripciones} inscripción(es)."
+            ),
+        )
+    nombre = gestion.nombre
+    db.delete(gestion)
+    db.commit()
+    registrar_auditoria(db, admin.id_usuario, "ELIMINAR_GESTION", "gestiones", f"Gestión {nombre}")
 
 # AULAS Y ASIENTOS
 @router.post("/aulas", response_model=AulaOut)
@@ -563,6 +615,31 @@ def actualizar_examen(
     db.refresh(examen)
     registrar_auditoria(db, admin.id_usuario, "ACTUALIZAR_EXAMEN", "examenes", f"Materia {examen.materia}")
     return examen
+
+
+@router.delete("/examenes/{id_examen}", status_code=204)
+def eliminar_examen(
+    id_examen: int,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_user),
+):
+    examen = db.query(Examen).filter(Examen.id_examen == id_examen).first()
+    if not examen:
+        raise HTTPException(status_code=404, detail="Examen no encontrado")
+    asignaciones = db.query(Asignacion).filter(Asignacion.id_examen == id_examen).count()
+    registros = db.query(RegistroIngreso).filter(RegistroIngreso.id_examen == id_examen).count()
+    if asignaciones or registros:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No se puede eliminar: el examen tiene {asignaciones} asignación(es) "
+                f"y {registros} registro(s) de ingreso."
+            ),
+        )
+    materia = examen.materia
+    db.delete(examen)
+    db.commit()
+    registrar_auditoria(db, admin.id_usuario, "ELIMINAR_EXAMEN", "examenes", f"Examen {materia}")
 
 
 @router.get("/auditoria")

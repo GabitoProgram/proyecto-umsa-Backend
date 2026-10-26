@@ -229,9 +229,34 @@ def listar_postulantes_examenes_activos(
     return candidatos
 
 
+@router.get("/postulantes/{id_postulante}/imagen")
+@marking_router.get("/postulantes/{id_postulante}/imagen")
+def obtener_foto_postulante(
+    id_postulante: int,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_app_key)
+):
+    """Foto del postulante (la de su registro facial) para la tarjeta de resultado.
+
+    La estación la pide con la clave de aplicación (X-App-Key), igual que el resto
+    de la marcación. Devuelve 404 si el postulante no tiene foto.
+    """
+    fila = db.query(Rostro.imagen_captura).filter(
+        Rostro.id_postulante == id_postulante,
+        Rostro.imagen_captura.isnot(None),
+    ).order_by(Rostro.habilitada.desc(), Rostro.fecha_registro.desc()).first()
+    if not fila or not fila[0]:
+        raise HTTPException(status_code=404, detail="El postulante no tiene foto")
+    return Response(
+        content=bytes(fila[0]),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
 @router.get("/plantilla-huella")
 @marking_router.get("/plantilla-huella")
-async def obtener_plantilla_huella(
+def obtener_plantilla_huella(
     id_postulante: int = Query(...),
     tipo_dedo: int = Query(...),
     db: Session = Depends(get_db),
@@ -353,7 +378,7 @@ def obtener_plantillas_examen(
 
 @router.post("/verificar-huella", response_model=MarcacionRespuestaOut)
 @marking_router.post("/verificar-huella", response_model=MarcacionRespuestaOut)
-async def verificar_huella_1a1(
+def verificar_huella_1a1(
     id_examen: int = Form(...),
     id_postulante: int = Form(...),
     tipo_dedo: int = Form(...),
@@ -367,7 +392,7 @@ async def verificar_huella_1a1(
     postulante = db.query(Postulante).filter(Postulante.id_postulante == id_postulante).first()
     if not postulante:
         raise HTTPException(status_code=404, detail="Postulante no encontrado")
-    captura = await file.read()
+    captura = file.file.read()
     # Si el cliente ya comparó la huella con la ZKFinger SDK (la tiene instalada
     # junto al lector), confiamos en su score; si no, comparamos en el servidor.
     if score_cliente is not None and score_cliente >= UMBRAL_HUELLA_CLIENTE:
@@ -394,7 +419,7 @@ async def verificar_huella_1a1(
 
 @router.post("/verificar-rostro", response_model=MarcacionRespuestaOut)
 @marking_router.post("/verificar-rostro", response_model=MarcacionRespuestaOut)
-async def verificar_rostro_1a1(
+def verificar_rostro_1a1(
     id_examen: int = Form(...),
     id_postulante: int = Form(...),
     file: UploadFile = File(...),
@@ -418,7 +443,7 @@ async def verificar_rostro_1a1(
             mensaje="El registro facial no está habilitado para este postulante",
             fecha_hora=datetime.now()
         )
-    contenido = await file.read()
+    contenido = file.file.read()
     imagen = face_service.procesar_imagen_bytes(contenido)
     embedding, _ = face_service.extraer_embedding(imagen) if imagen is not None else (None, None)
     score = face_service.similitud_coseno(embedding, rostro.embedding) if embedding else 0.0
@@ -490,7 +515,7 @@ def _buscar_contexto_examen(
 
 @router.post("/identificar-rostro")
 @marking_router.post("/identificar-rostro")
-async def identificar_rostro_automatico(
+def identificar_rostro_automatico(
     file: UploadFile = File(...),
     id_examen: Optional[int] = Form(None),
     db: Session = Depends(get_db),
@@ -502,7 +527,7 @@ async def identificar_rostro_automatico(
     si coincide, valida las reglas de acceso, registra el ingreso y devuelve
     los datos completos del postulante (carrera, materia, aula, asiento, hora).
     """
-    contenido = await file.read()
+    contenido = file.file.read()
     imagen = face_service.procesar_imagen_bytes(contenido)
     if imagen is None:
         return {"coincidencia": False, "mensaje": "Formato de imagen inválido"}
@@ -511,20 +536,14 @@ async def identificar_rostro_automatico(
     if embedding is None:
         return {"coincidencia": False, "mensaje": "No se detectó ningún rostro en la imagen"}
 
-    rostros_activos = db.query(Rostro).filter(Rostro.habilitada.is_(True)).all()
-    if not rostros_activos:
+    # Búsqueda 1:N sobre la caché en memoria de rostros habilitados
+    mejor = face_service.buscar_mejor(embedding, db)
+    if mejor is None:
         return {"coincidencia": False, "mensaje": "No hay rostros habilitados en el sistema"}
-
-    mejor_rostro = None
-    mejor_score = -1.0
-    for rostro in rostros_activos:
-        similitud = face_service.similitud_coseno(embedding, rostro.embedding)
-        if similitud > mejor_score:
-            mejor_score = similitud
-            mejor_rostro = rostro
+    _, id_postulante_mejor, mejor_score = mejor
 
     ahora = datetime.now()
-    if mejor_rostro is None or mejor_score < 0.50:
+    if mejor_score < 0.50:
         return {
             "coincidencia": False,
             "score_similitud": round(mejor_score, 4),
@@ -532,7 +551,7 @@ async def identificar_rostro_automatico(
         }
 
     postulante = db.query(Postulante).filter(
-        Postulante.id_postulante == mejor_rostro.id_postulante
+        Postulante.id_postulante == id_postulante_mejor
     ).first()
     if not postulante:
         return {"coincidencia": False, "mensaje": "Postulante no encontrado"}
