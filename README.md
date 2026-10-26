@@ -52,26 +52,47 @@ source venv/Scripts/activate
 
 ## Configurar `.env`
 
-Copia el archivo de ejemplo:
+Copia el archivo de ejemplo usando el comando de tu terminal.
+
+**PowerShell**
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Edita `.env` y configura tus valores locales:
+**Git Bash**
+
+```bash
+cp .env.example .env
+```
+
+Edita `.env` y reemplaza **todos** los valores de ejemplo. El backend se
+negará a arrancar si `SECRET_KEY` o `APP_CLIENT_KEY` siguen con un valor de
+ejemplo o si tienen menos de 32 caracteres.
+
+Para generar claves nuevas (con el entorno virtual activo):
+
+```powershell
+python app/generar_claves.py
+```
+
+El script imprime dos líneas, `SECRET_KEY` y `APP_CLIENT_KEY`. Pégalas en
+`.env`:
 
 ```dotenv
 DATABASE_URL=postgresql://postgres:TU_CONTRASEÑA@localhost:5432/umsa_prefacultativo
-SECRET_KEY=GENERA_UNA_CLAVE_LARGA_Y_ALEATORIA
+SECRET_KEY=CAMBIA_ESTO_POR_LA_CLAVE_GENERADA
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=720
-APP_CLIENT_KEY=GENERA_OTRA_CLAVE_COMPARTIDA
+APP_CLIENT_KEY=CAMBIA_ESTO_POR_LA_CLAVE_COMPARTIDA
 ```
 
-`SECRET_KEY` y `APP_CLIENT_KEY` deben tener al menos 32 caracteres y no deben
-ser valores de ejemplo. No subas `.env` a Git.
+Si la contraseña de PostgreSQL contiene caracteres especiales como `@`, `:`,
+`/` o `#`, debes codificarlos para URL o usar una contraseña sin esos
+caracteres.
 
-La misma `APP_CLIENT_KEY` debe configurarse en el frontend.
+No subas `.env` a Git. La misma `APP_CLIENT_KEY` debe configurarse en el
+frontend.
 
 ## Inicializar y migrar la base de datos
 
@@ -101,10 +122,19 @@ resultado de `psql` antes de continuar.
 
 ## Crear el usuario inicial
 
-Opcionalmente define una contraseña inicial:
+Opcionalmente define una contraseña inicial.
+
+**PowerShell**
 
 ```powershell
 $env:ADMIN_INITIAL_PASSWORD="CambiaEstaClavePorUnaSegura"
+python seed.py
+```
+
+**Git Bash**
+
+```bash
+export ADMIN_INITIAL_PASSWORD="CambiaEstaClavePorUnaSegura"
 python seed.py
 ```
 

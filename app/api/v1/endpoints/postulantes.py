@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, 
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.deps import get_current_user, registrar_auditoria
+from app.api.deps import get_current_user, require_super_admin, registrar_auditoria
 from app.models.usuario import Usuario
 from app.models.postulante import Postulante, OrigenRegistro
 from app.models.marcacion import RegistroIngreso
@@ -55,6 +55,18 @@ def listar_postulantes(
 ):
     postulantes = db.query(Postulante).offset(skip).limit(limit).all()
     return [_postulante_response(db, p) for p in postulantes]
+
+@router.get("/buscar", response_model=PostulanteResponse)
+def buscar_postulante_por_ci(
+    ci: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    ci_limpio = ci.strip()
+    postulante = db.query(Postulante).filter(Postulante.ci == ci_limpio).first()
+    if not postulante:
+        raise HTTPException(status_code=404, detail="Postulante no encontrado")
+    return _postulante_response(db, postulante)
 
 @router.post("", response_model=PostulanteResponse)
 @router.post("/", response_model=PostulanteResponse, include_in_schema=False)
@@ -122,7 +134,7 @@ def actualizar_postulante(
 def eliminar_postulante(
     id_postulante: int,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_current_user)
+    admin: Usuario = Depends(require_super_admin)
 ):
     postulante = db.query(Postulante).filter(Postulante.id_postulante == id_postulante).first()
     if not postulante:

@@ -9,7 +9,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 # Huellas SHA-256 de claves que estuvieron publicadas en el repositorio.
 # Se guardan solo sus huellas: sirven para negarse a arrancar con ellas sin
 # volver a publicarlas. Cualquier clave nueva generada con
-# ``python scripts/generar_claves.py`` es aceptada.
+# ``python app/generar_claves.py`` es aceptada.
 _CLAVES_PUBLICADAS = {
     "b2275570900cd07d5c297a4129dcea714fb0de35713637842a6a97f5ed7c4a70",
     "fb83debb5a75ab5a07ff3b60b273f119785346d73539e02cab7131bd9e10be59",
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     @classmethod
     def _validar_clave(cls, valor: str, info) -> str:
         nombre = info.field_name
-        ayuda = "Genera una nueva con:  python scripts/generar_claves.py"
+        ayuda = "Genera una nueva con:  python app/generar_claves.py"
         if valor.upper().startswith(("CAMBIA", "GENERA")):
             raise ValueError(f"{nombre} sigue con el valor de ejemplo. {ayuda}")
         if len(valor) < _LARGO_MINIMO_CLAVE:

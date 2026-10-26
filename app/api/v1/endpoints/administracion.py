@@ -195,7 +195,7 @@ def actualizar_carrera(
 def eliminar_carrera(
     id_carrera: int,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_current_user),
+    admin: Usuario = Depends(require_super_admin),
 ):
     carrera = db.query(Carrera).filter(Carrera.id_carrera == id_carrera).first()
     if not carrera:
@@ -273,7 +273,7 @@ def actualizar_gestion(
 def eliminar_gestion(
     id_gestion: int,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_current_user),
+    admin: Usuario = Depends(require_super_admin),
 ):
     gestion = db.query(Gestion).filter(Gestion.id_gestion == id_gestion).first()
     if not gestion:
@@ -621,7 +621,7 @@ def actualizar_examen(
 def eliminar_examen(
     id_examen: int,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_current_user),
+    admin: Usuario = Depends(require_super_admin),
 ):
     examen = db.query(Examen).filter(Examen.id_examen == id_examen).first()
     if not examen:

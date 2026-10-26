@@ -1,7 +1,7 @@
 """Genera claves nuevas y seguras para el servidor.
 
 Uso:
-    python scripts/generar_claves.py
+    python app/generar_claves.py
 
 Copia las dos líneas que imprime en el archivo ``.env`` del SERVIDOR.
 La ``APP_CLIENT_KEY`` también hay que ponerla en cada estación de registro

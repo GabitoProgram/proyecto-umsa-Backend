@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.deps import get_current_user, registrar_auditoria
+from app.api.deps import get_current_user, require_super_admin, registrar_auditoria
 from app.models.usuario import Usuario
 from app.models.asignacion import Asignacion, Inscripcion
 from app.models.academico import Examen
@@ -347,7 +347,7 @@ def sortear_asientos_examen(
 def limpiar_asignaciones_examen(
     id_examen: int,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_current_user)
+    admin: Usuario = Depends(require_super_admin)
 ):
     """Elimina las asignaciones (y sus registros de ingreso) de un examen para volver a sortear."""
     examen = db.query(Examen).filter(Examen.id_examen == id_examen).first()
