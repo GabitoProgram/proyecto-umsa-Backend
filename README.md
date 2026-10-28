@@ -20,7 +20,15 @@ otras dependencias biométricas.
 
 Con PostgreSQL instalado, crea la base vacía:
 
+**PowerShell**
+
 ```powershell
+psql -U postgres
+```
+
+**Git Bash**
+
+```bash
 psql -U postgres
 ```
 
@@ -37,6 +45,8 @@ Si la base ya existe, no es necesario crearla nuevamente.
 
 Desde la carpeta del backend:
 
+**PowerShell**
+
 ```powershell
 py -3.11 -m venv venv
 .\venv\Scripts\Activate.ps1
@@ -44,10 +54,13 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-En Git Bash, la activación equivalente es:
+**Git Bash**
 
 ```bash
+py -3.11 -m venv venv
 source venv/Scripts/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
 ## Configurar `.env`
@@ -72,7 +85,15 @@ ejemplo o si tienen menos de 32 caracteres.
 
 Para generar claves nuevas (con el entorno virtual activo):
 
+**PowerShell**
+
 ```powershell
+python app/generar_claves.py
+```
+
+**Git Bash**
+
+```bash
 python app/generar_claves.py
 ```
 
@@ -98,11 +119,21 @@ frontend.
 
 Primero crea las tablas y tipos ENUM de SQLAlchemy:
 
+**PowerShell**
+
 ```powershell
 python init_db.py
 ```
 
+**Git Bash**
+
+```bash
+python init_db.py
+```
+
 Después aplica las migraciones SQL, en este orden:
+
+**PowerShell**
 
 ```powershell
 psql -U postgres -d umsa_prefacultativo -f migrate_postulantes_contacto.sql
@@ -110,10 +141,26 @@ psql -U postgres -d umsa_prefacultativo -f migrate_marcacion_sin_asiento.sql
 psql -U postgres -d umsa_prefacultativo -f migrate_remove_stations.sql
 ```
 
+**Git Bash**
+
+```bash
+psql -U postgres -d umsa_prefacultativo -f migrate_postulantes_contacto.sql
+psql -U postgres -d umsa_prefacultativo -f migrate_marcacion_sin_asiento.sql
+psql -U postgres -d umsa_prefacultativo -f migrate_remove_stations.sql
+```
+
 Si `psql` no está en el PATH de Windows, usa su ruta completa, por ejemplo:
+
+**PowerShell**
 
 ```powershell
 & "C:\Program Files\PostgreSQL\17\bin\psql.exe" -U postgres -d umsa_prefacultativo -f migrate_postulantes_contacto.sql
+```
+
+**Git Bash**
+
+```bash
+"/c/Program Files/PostgreSQL/17/bin/psql.exe" -U postgres -d umsa_prefacultativo -f migrate_postulantes_contacto.sql
 ```
 
 Las migraciones utilizan `IF NOT EXISTS` en los cambios principales, por lo
@@ -154,7 +201,15 @@ Cambia la contraseña después del primer inicio de sesión.
 
 Con el entorno virtual activo:
 
+**PowerShell**
+
 ```powershell
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+**Git Bash**
+
+```bash
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -166,7 +221,15 @@ URLs útiles:
 
 Si el puerto 8000 está ocupado:
 
+**PowerShell**
+
 ```powershell
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8001
+```
+
+**Git Bash**
+
+```bash
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8001
 ```
 
@@ -186,7 +249,16 @@ habilitadas para el examen correspondiente.
 
 Instala las dependencias de desarrollo:
 
+**PowerShell**
+
 ```powershell
+pip install -r requirements-dev.txt
+pytest -q
+```
+
+**Git Bash**
+
+```bash
 pip install -r requirements-dev.txt
 pytest -q
 ```
