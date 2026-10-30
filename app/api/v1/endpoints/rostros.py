@@ -12,6 +12,7 @@ from app.api.deps import get_current_user, registrar_auditoria
 from app.models.usuario import Usuario
 from app.models.postulante import Postulante, EstadoBiometria
 from app.models.biometria import Rostro, Huella
+from app.models.asignacion import Inscripcion
 from app.services.face_service import face_service
 
 router = APIRouter(prefix="/rostros", tags=["Reconocimiento Facial"])
@@ -184,6 +185,89 @@ class RostroOut(BaseModel):
     habilitada: bool
     fecha_registro: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class HabilitarRostrosMasivo(BaseModel):
+    """Habilita o deshabilita el rostro más reciente de varios postulantes."""
+
+    habilitada: bool
+    id_gestion: Optional[int] = None
+    id_carrera: Optional[int] = None
+
+
+@router.patch("/habilitadas")
+def cambiar_estado_rostros_masivo(
+    payload: HabilitarRostrosMasivo,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_user)
+):
+    """Habilita/deshabilita en bloque el rostro de los postulantes de una gestión.
+
+    Solo actúa sobre el rostro más reciente de cada postulante (el que usa el
+    reconocimiento), para no reactivar registros viejos que fueron reemplazados.
+    Devuelve cuántos postulantes de la gestión no tienen rostro registrado.
+    """
+    ids_postulante = None
+    if payload.id_gestion is not None:
+        consulta_inscripciones = db.query(Inscripcion.id_postulante).filter(
+            Inscripcion.id_gestion == payload.id_gestion,
+            Inscripcion.estado == "HABILITADO",
+        )
+        if payload.id_carrera is not None:
+            consulta_inscripciones = consulta_inscripciones.filter(
+                Inscripcion.id_carrera == payload.id_carrera
+            )
+        ids_postulante = {fila[0] for fila in consulta_inscripciones.all()}
+
+    # Un rostro vigente por postulante: el de mayor id (el último registrado).
+    ultimos = db.query(
+        func.max(Rostro.id_rostro).label("id_rostro")
+    ).group_by(Rostro.id_postulante).subquery()
+
+    consulta = db.query(Rostro).join(
+        ultimos, Rostro.id_rostro == ultimos.c.id_rostro
+    )
+    if ids_postulante is not None:
+        if not ids_postulante:
+            return {
+                "habilitada": payload.habilitada,
+                "postulantes_en_gestion": 0,
+                "con_rostro": 0,
+                "sin_rostro": 0,
+                "cambiados": 0,
+            }
+        consulta = consulta.filter(Rostro.id_postulante.in_(ids_postulante))
+
+    rostros = consulta.all()
+    cambiados = 0
+    for rostro in rostros:
+        if bool(rostro.habilitada) == payload.habilitada:
+            continue
+        rostro.habilitada = payload.habilitada
+        rostro.habilitada_por = admin.id_usuario if payload.habilitada else None
+        cambiados += 1
+
+    if cambiados:
+        db.commit()
+        face_service.invalidar_cache()
+
+    con_rostro = len({rostro.id_postulante for rostro in rostros})
+    postulantes_en_gestion = len(ids_postulante) if ids_postulante is not None else con_rostro
+
+    registrar_auditoria(
+        db, admin.id_usuario,
+        "HABILITAR_ROSTROS_MASIVO" if payload.habilitada else "DESHABILITAR_ROSTROS_MASIVO",
+        "rostros",
+        f"Gestión {payload.id_gestion}: {cambiados} rostro(s) actualizado(s)",
+    )
+
+    return {
+        "habilitada": payload.habilitada,
+        "postulantes_en_gestion": postulantes_en_gestion,
+        "con_rostro": con_rostro,
+        "sin_rostro": max(0, postulantes_en_gestion - con_rostro),
+        "cambiados": cambiados,
+    }
 
 
 @router.patch("/{id_rostro}/habilitada", response_model=RostroOut)

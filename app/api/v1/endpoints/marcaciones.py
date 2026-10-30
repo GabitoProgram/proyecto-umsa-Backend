@@ -132,11 +132,15 @@ def validar_cuatro_reglas_y_registrar(
             fecha_hora=ahora
         )
 
-    # Si ya tenía un ingreso aceptado previamente, informar
+    # Ingreso aceptado previo: se conserva la hora original y no se duplica
+    # el registro. La re-marcación queda como consulta de sólo lectura.
     ingreso_previo = db.query(RegistroIngreso).filter(
         RegistroIngreso.id_examen == examen.id_examen,
         RegistroIngreso.id_inscripcion == inscripcion.id_inscripcion,
         RegistroIngreso.resultado == ResultadoMarcacion.ACEPTADO
+    ).order_by(
+        RegistroIngreso.fecha_hora.asc(),
+        RegistroIngreso.id_registro.asc()
     ).first()
 
     aula = None
@@ -145,7 +149,24 @@ def validar_cuatro_reglas_y_registrar(
         aula = db.query(Aula).filter(Aula.id_aula == asignacion.id_aula).first()
         asiento = db.query(Asiento).filter(Asiento.id_asiento == asignacion.id_asiento).first()
 
-    # Registro exitoso
+    if ingreso_previo:
+        return MarcacionRespuestaOut(
+            resultado=ResultadoMarcacion.ACEPTADO,
+            metodo=metodo,
+            id_postulante=postulante.id_postulante,
+            ci=postulante.ci,
+            nombre_completo=f"{postulante.nombres} {postulante.apellidos}",
+            aula=aula.nombre if aula else "Sin asignar",
+            numero_asiento=asiento.numero_asiento if asiento else 0,
+            mensaje=(
+                "ACCESO YA REGISTRADO A LAS "
+                f"{ingreso_previo.fecha_hora.strftime('%H:%M:%S')}"
+            ),
+            score_similitud=score,
+            fecha_hora=ingreso_previo.fecha_hora
+        )
+
+    # Registro exitoso (primer ingreso)
     reg = RegistroIngreso(
         id_asignacion=asignacion.id_asignacion if asignacion else None,
         id_examen=examen.id_examen,
@@ -155,7 +176,7 @@ def validar_cuatro_reglas_y_registrar(
         score_similitud=score,
         fecha_hora=ahora,
         estacion=cliente,
-        observacion="INGRESO AUTORIZADO" if not ingreso_previo else "RE-INGRESO AUTORIZADO"
+        observacion="INGRESO AUTORIZADO"
     )
     db.add(reg)
     db.commit()
@@ -168,7 +189,7 @@ def validar_cuatro_reglas_y_registrar(
         nombre_completo=f"{postulante.nombres} {postulante.apellidos}",
         aula=aula.nombre if aula else "Sin asignar",
         numero_asiento=asiento.numero_asiento if asiento else 0,
-        mensaje="ACCESO CONCEDIDO - Bienvenido" if not ingreso_previo else "ACCESO YA REGISTRADO PREVIAMENTE",
+        mensaje="ACCESO CONCEDIDO - Bienvenido",
         score_similitud=score,
         fecha_hora=ahora
     )
@@ -586,17 +607,23 @@ def identificar_rostro_automatico(
 
     # Evitar duplicar el registro si el mismo postulante se detecta de nuevo
     # pocos segundos después (p. ej. permanece frente a la cámara).
-    reciente = db.query(RegistroIngreso).filter(
+    # Se toma el PRIMER ingreso aceptado para conservar siempre esa hora.
+    primer_ingreso = db.query(RegistroIngreso).filter(
         RegistroIngreso.id_examen == examen.id_examen,
         RegistroIngreso.id_inscripcion == inscripcion.id_inscripcion,
         RegistroIngreso.resultado == ResultadoMarcacion.ACEPTADO,
-    ).order_by(RegistroIngreso.fecha_hora.desc()).first()
+    ).order_by(
+        RegistroIngreso.fecha_hora.asc(),
+        RegistroIngreso.id_registro.asc(),
+    ).first()
 
-    if reciente and (ahora - reciente.fecha_hora) < timedelta(seconds=45):
+    if primer_ingreso and (ahora - primer_ingreso.fecha_hora) < timedelta(seconds=45):
+        hora = primer_ingreso.fecha_hora.strftime("%H:%M:%S")
         respuesta.update({
             "resultado": "ACEPTADO",
-            "hora_ingreso": reciente.fecha_hora.strftime("%H:%M:%S"),
-            "mensaje": f"Ingreso ya registrado a las {reciente.fecha_hora.strftime('%H:%M:%S')}",
+            "fecha_hora": primer_ingreso.fecha_hora.isoformat(),
+            "hora_ingreso": hora,
+            "mensaje": f"Ingreso ya registrado a las {hora}",
         })
         return respuesta
 
@@ -610,6 +637,8 @@ def identificar_rostro_automatico(
             else str(resultado.resultado)
         ),
         "mensaje": resultado.mensaje,
+        "fecha_hora": resultado.fecha_hora.isoformat(),
+        "hora_ingreso": resultado.fecha_hora.strftime("%H:%M:%S"),
         "aula": resultado.aula or respuesta.get("aula"),
         "numero_asiento": resultado.numero_asiento or respuesta.get("numero_asiento"),
     })

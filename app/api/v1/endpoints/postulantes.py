@@ -1,5 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -19,13 +20,9 @@ router = APIRouter(prefix="/postulantes", tags=["Postulantes"])
 MAXIMO_CARRERAS = 2
 
 
-def _postulante_response(db: Session, postulante: Postulante) -> PostulanteResponse:
-    rostro = db.query(Rostro).filter(
-        Rostro.id_postulante == postulante.id_postulante
-    ).order_by(Rostro.fecha_registro.desc()).first()
-    cantidad_huellas = db.query(Huella).filter(
-        Huella.id_postulante == postulante.id_postulante
-    ).count()
+def _respuesta_con_biometria(
+    postulante: Postulante, rostro, cantidad_huellas: int
+) -> PostulanteResponse:
     return PostulanteResponse(
         id_postulante=postulante.id_postulante,
         ci=postulante.ci,
@@ -45,16 +42,72 @@ def _postulante_response(db: Session, postulante: Postulante) -> PostulanteRespo
         cantidad_huellas=cantidad_huellas
     )
 
+
+def _postulante_response(db: Session, postulante: Postulante) -> PostulanteResponse:
+    rostro = db.query(Rostro).filter(
+        Rostro.id_postulante == postulante.id_postulante
+    ).order_by(Rostro.fecha_registro.desc()).first()
+    cantidad_huellas = db.query(Huella).filter(
+        Huella.id_postulante == postulante.id_postulante
+    ).count()
+    return _respuesta_con_biometria(postulante, rostro, cantidad_huellas)
+
+
+def _postulantes_response_bulk(
+    db: Session, postulantes: List[Postulante]
+) -> List[PostulanteResponse]:
+    """Igual que _postulante_response pero en 2 consultas (no 2 por fila).
+
+    Con 1000+ postulantes el N+1 tardaba segundos en abrir el panel.
+    """
+    ids = [p.id_postulante for p in postulantes]
+    if not ids:
+        return []
+    rostros = db.query(Rostro).filter(
+        Rostro.id_postulante.in_(ids)
+    ).order_by(
+        Rostro.id_postulante,
+        Rostro.fecha_registro.desc(),
+        Rostro.id_rostro.desc(),
+    ).all()
+    ultimo = {}
+    for rostro in rostros:
+        ultimo.setdefault(rostro.id_postulante, rostro)
+    conteos = dict(db.query(
+        Huella.id_postulante, func.count(Huella.id_huella)
+    ).filter(
+        Huella.id_postulante.in_(ids)
+    ).group_by(Huella.id_postulante).all())
+    return [
+        _respuesta_con_biometria(
+            p, ultimo.get(p.id_postulante), int(conteos.get(p.id_postulante, 0))
+        )
+        for p in postulantes
+    ]
+
+
 @router.get("", response_model=List[PostulanteResponse])
 @router.get("/", response_model=List[PostulanteResponse], include_in_schema=False)
 def listar_postulantes(
     skip: int = Query(0, ge=0),
     limit: int = Query(200, ge=1),
+    q: Optional[str] = Query(None, min_length=1),
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_current_user)
 ):
-    postulantes = db.query(Postulante).offset(skip).limit(limit).all()
-    return [_postulante_response(db, p) for p in postulantes]
+    consulta = db.query(Postulante)
+    if q:
+        patron = f"%{q.strip()}%"
+        consulta = consulta.filter(or_(
+            Postulante.ci.ilike(patron),
+            Postulante.nombres.ilike(patron),
+            Postulante.apellidos.ilike(patron),
+            func.concat(
+                Postulante.nombres, " ", Postulante.apellidos
+            ).ilike(patron),
+        ))
+    postulantes = consulta.offset(skip).limit(limit).all()
+    return _postulantes_response_bulk(db, postulantes)
 
 @router.get("/buscar", response_model=PostulanteResponse)
 def buscar_postulante_por_ci(
@@ -102,6 +155,22 @@ def crear_postulante(
         pass
 
     return _postulante_response(db, nuevo)
+
+
+@router.get("/estadisticas")
+def estadisticas_postulantes(
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    """Conteo por estado biométrico (para el panel, sin traer miles de filas)."""
+    filas = db.query(
+        Postulante.estado_biometria, func.count(Postulante.id_postulante)
+    ).group_by(Postulante.estado_biometria).all()
+    return {
+        (estado.value if hasattr(estado, "value") else str(estado or "PENDIENTE")):
+            int(total)
+        for estado, total in filas
+    }
 
 
 @router.patch("/{id_postulante}", response_model=PostulanteResponse)
